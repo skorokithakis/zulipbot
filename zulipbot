@@ -42,7 +42,6 @@ class Messages:
     @orm.db_session
     def append(self, message, user=True):
         """Insert a message into the database."""
-        print(message)
         Message(
             conversation_id=self._conversation_id,
             role="user" if user else "assistant",
@@ -90,6 +89,7 @@ class ZulipBot:
         self._client = zulip.Client()
         self._own_user_id = None
 
+    @run_threaded
     def process_message(self, message):
         if message["sender_id"] == self._own_user_id:
             return
@@ -99,6 +99,7 @@ class ZulipBot:
         )
 
         reply = get_reply(message)
+        print(f"[{message['subject']}] Assistant: {reply}")
         request = {
             "type": "stream",
             "to": message["stream_id"],

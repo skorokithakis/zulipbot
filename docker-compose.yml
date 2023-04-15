@@ -1,0 +1,11 @@
+services:
+  zulipbot:
+    build: .
+    volumes:
+      - {{ HM_DATA_DIR }}:/database/
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY:
+      ZULIP_API_KEY:
+      ZULIP_EMAIL:
+      ZULIP_SITE:
