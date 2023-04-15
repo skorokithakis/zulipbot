@@ -12,7 +12,7 @@ from pony import orm
 openai.api_key = os.getenv("OPENAI_API_KEY")
 OWN_USER_ID = None
 db = orm.Database()
-db.bind(provider="sqlite", filename="database.sqlite3", create_db=True)
+db.bind(provider="sqlite", filename="/database/database.sqlite3", create_db=True)
 
 
 class Message(db.Entity):  # type: ignore
