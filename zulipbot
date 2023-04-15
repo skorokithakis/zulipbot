@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+import hashlib
+import os
+import threading
+from datetime import datetime
+
+import openai
+import zulip
+from pony import orm
+
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
+OWN_USER_ID = None
+db = orm.Database()
+db.bind(provider="sqlite", filename="database.sqlite3", create_db=True)
+
+
+class Message(db.Entity):  # type: ignore
+    timestamp = orm.Required(datetime, default=lambda: datetime.utcnow())
+    conversation_id = orm.Required(str, index=True)
+    role = orm.Required(str)
+    message = orm.Required(str)
+
+
+db.generate_mapping(create_tables=True)
+
+
+def run_threaded(fn):
+    def run(*k, **kw):
+        t = threading.Thread(target=fn, args=k, kwargs=kw, daemon=True)
+        t.daemon = True
+        t.start()
+        return t
+
+    return run
+
+
+class Messages:
+    def __init__(self, conversation_id):
+        self._conversation_id = conversation_id
+
+    @orm.db_session
+    def append(self, message, user=True):
+        """Insert a message into the database."""
+        print(message)
+        Message(
+            conversation_id=self._conversation_id,
+            role="user" if user else "assistant",
+            message=message,
+        )
+
+    @orm.db_session
+    def get(self):
+        """Retrieve the last few messages."""
+        messages = list(
+            reversed(
+                [
+                    {"role": x.role, "content": x.message}
+                    for x in orm.select(
+                        m for m in Message if m.conversation_id == self._conversation_id
+                    ).order_by(orm.desc(Message.timestamp))[:10]
+                ]
+            )
+        )
+        return messages
+
+
+def get_reply(message):
+    conversation_id = f"zulipbot_{message['sender_realm_str']}_{message['sender_id']}_{message['stream_id']}_{hashlib.md5(message['subject'].encode()).hexdigest()}"
+
+    chat = [
+        {
+            "role": "system",
+            "content": "You are a helpful and polite assistant, here to assist the user.",
+        },
+    ]
+    messages = Messages(conversation_id)
+    messages.append(message["content"])
+    chat.extend(messages.get())
+    completion = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo", messages=chat, temperature=0.3
+    )
+    reply = completion["choices"][0]["message"]["content"].strip()
+    messages.append(reply, user=False)
+    return reply
+
+
+class ZulipBot:
+    def __init__(self):
+        self._client = zulip.Client()
+        self._own_user_id = None
+
+    def process_message(self, message):
+        if message["sender_id"] == self._own_user_id:
+            return
+
+        print(
+            f"[{message['subject']}] {message['sender_full_name']}: {message['content']}"
+        )
+
+        reply = get_reply(message)
+        request = {
+            "type": "stream",
+            "to": message["stream_id"],
+            "topic": message["subject"],
+            "content": reply,
+        }
+        self._client.send_message(request)
+
+    def run(self):
+        result = self._client.get_profile()
+        print(f"Running as {result['user_id']}.")
+        self._own_user_id = result["user_id"]
+        self._client.call_on_each_message(self.process_message)
+
+
+def main():
+    print("Starting up...")
+    bot = ZulipBot()
+    bot.run()
+
+
+if __name__ == "__main__":
+    main()
