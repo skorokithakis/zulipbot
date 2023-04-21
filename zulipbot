@@ -65,7 +65,8 @@ class Messages:
 
 
 def get_reply(message):
-    conversation_id = f"zulipbot_{message['sender_realm_str']}_{message['sender_id']}_{message['stream_id']}_{hashlib.md5(message['subject'].encode()).hexdigest()}"
+    stream_id = message["stream_id"] if message["type"] == "stream" else "private"
+    conversation_id = f"zulipbot_{message['sender_realm_str']}_{message['sender_id']}_{stream_id}_{hashlib.md5(message['subject'].encode()).hexdigest()}"
 
     chat = [
         {
@@ -100,12 +101,19 @@ class ZulipBot:
 
         reply = get_reply(message)
         print(f"[{message['subject']}] Assistant: {reply}")
-        request = {
-            "type": "stream",
-            "to": message["stream_id"],
-            "topic": message["subject"],
-            "content": reply,
-        }
+        if message["type"] == "stream":
+            request = {
+                "type": "stream",
+                "to": message["stream_id"],
+                "topic": message["subject"],
+                "content": reply,
+            }
+        else:
+            request = {
+                "type": "private",
+                "to": message["sender_email"],
+                "content": reply,
+            }
         self._client.send_message(request)
 
     def run(self):
